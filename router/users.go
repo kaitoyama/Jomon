@@ -13,7 +13,14 @@ const (
 )
 
 func (s *Service) GetUsers(c echo.Context) error {
-	token := c.Get(contextAccessTokenKey).(string)
+	token, _ := c.Get(contextAccessTokenKey).(string)
+
+	// Under forward-auth (NeoShowcase Soft) there is no traQ access token to query
+	// the traQ user list, so return an empty list (200) instead of failing. The
+	// client lets the accountant type a trap_id directly. (deploy: Soft auth)
+	if token == "" {
+		return c.JSON(http.StatusOK, []model.User{})
+	}
 
 	users, err := s.Users.GetUsers(token)
 	if err != nil {

@@ -82,7 +82,7 @@
         </div>
 
         <div>
-          <v-autocomplete
+          <v-combobox
             ref="traPIDRef"
             v-model="traPID"
             :rules="[
@@ -91,7 +91,7 @@
             label="返金対象者"
             filled
             :items="traPIDs"
-            hint="traQ IDの一部入力で候補が表示されます"
+            hint="traQ IDを入力（候補があれば表示／無ければ直接入力してEnter）"
             required
             multiple
           />
