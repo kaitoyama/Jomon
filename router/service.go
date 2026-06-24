@@ -46,6 +46,11 @@ func newImageRepository() model.ApplicationsImageRepository {
 		if dir == "" {
 			dir = "./uploads"
 		}
+		// NewLocalStorage requires the directory to already exist; create it, since
+		// the container FS starts empty (and resets on restart).
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			panic(err)
+		}
 		local, err := storagePkg.NewLocalStorage(dir)
 		if err != nil {
 			panic(err)

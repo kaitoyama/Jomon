@@ -5,6 +5,8 @@ package router
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -187,4 +189,20 @@ func TestAuthUser_Forwarded_NonAdmin(t *testing.T) {
 	user, _ := got.Get(contextUserKey).(model.User)
 	assert.Equal(t, "bob", user.TrapId)
 	assert.False(t, user.IsAdmin)
+}
+
+// The local-storage fallback (no Swift configured) creates the upload directory
+// when it does not exist, instead of panicking — regression for the NeoShowcase
+// "panic: dir doesn't exist" startup crash.
+func TestNewImageRepository_LocalFallbackCreatesDir(t *testing.T) {
+	t.Setenv("OS_AUTH_URL", "") // force the local-storage branch
+	dir := filepath.Join(t.TempDir(), "uploads-nested")
+	t.Setenv("UPLOAD_DIR", dir)
+
+	repo := newImageRepository()
+
+	assert.NotNil(t, repo)
+	fi, err := os.Stat(dir)
+	assert.NoError(t, err)
+	assert.True(t, fi.IsDir())
 }
