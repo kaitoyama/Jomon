@@ -24,7 +24,7 @@ func NewService() Service {
 
 	gob.Register(model.User{})
 
-	return Service{
+	s := Service{
 		Administrators: model.NewAdministratorRepository(),
 		Applications:   model.NewApplicationRepository(),
 		Comments:       model.NewCommentRepository(),
@@ -32,6 +32,24 @@ func NewService() Service {
 		Users:          model.NewUserRepository(),
 		TraQAuth:       model.NewTraQAuthRepository(traQClientId),
 		Webhook:        model.NewWebhookRepository(webhookSecret, webhookChannelId, webhookId),
+	}
+	seedAdmins(s)
+	return s
+}
+
+// seedAdmins ensures configured trap_ids are administrators on startup. The
+// production build otherwise starts with no admins, but the payout write-back
+// and the admin UI both need one (avoids the easy-to-forget manual SQL seed).
+// INITIAL_ADMIN_TRAP_IDS is a comma-separated list; the Checkin service account
+// (SERVICE_USER_TRAP_ID) is included too. Idempotent (FirstOrCreate); a no-op
+// when neither env is set. (deploy: NeoShowcase dev)
+func seedAdmins(s Service) {
+	ids := strings.Split(os.Getenv("INITIAL_ADMIN_TRAP_IDS"), ",")
+	ids = append(ids, os.Getenv("SERVICE_USER_TRAP_ID"))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			_ = s.Administrators.AddAdministrator(id)
+		}
 	}
 }
 

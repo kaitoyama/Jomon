@@ -18,6 +18,7 @@ import (
 // service-auth branch of AuthUser without a database.
 type stubAdminRepo struct {
 	admins []string
+	added  []string
 	err    error
 }
 
@@ -30,8 +31,11 @@ func (r *stubAdminRepo) IsAdmin(userId string) (bool, error) {
 	return false, r.err
 }
 func (r *stubAdminRepo) GetAdministratorList() ([]string, error) { return r.admins, r.err }
-func (r *stubAdminRepo) AddAdministrator(string) error           { return r.err }
-func (r *stubAdminRepo) RemoveAdministrator(string) error        { return r.err }
+func (r *stubAdminRepo) AddAdministrator(id string) error {
+	r.added = append(r.added, id)
+	return r.err
+}
+func (r *stubAdminRepo) RemoveAdministrator(string) error { return r.err }
 
 func newAuthContext(authHeader string) (echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
@@ -205,4 +209,26 @@ func TestNewImageRepository_LocalFallbackCreatesDir(t *testing.T) {
 	fi, err := os.Stat(dir)
 	assert.NoError(t, err)
 	assert.True(t, fi.IsDir())
+}
+
+// seedAdmins registers INITIAL_ADMIN_TRAP_IDS + SERVICE_USER_TRAP_ID, trimming
+// blanks, so the production build isn't left with zero admins.
+func TestSeedAdmins(t *testing.T) {
+	t.Setenv("INITIAL_ADMIN_TRAP_IDS", "alice, bob ,")
+	t.Setenv("SERVICE_USER_TRAP_ID", "checkin")
+	stub := &stubAdminRepo{}
+
+	seedAdmins(Service{Administrators: stub})
+
+	assert.ElementsMatch(t, []string{"alice", "bob", "checkin"}, stub.added)
+}
+
+func TestSeedAdmins_NoEnv(t *testing.T) {
+	t.Setenv("INITIAL_ADMIN_TRAP_IDS", "")
+	t.Setenv("SERVICE_USER_TRAP_ID", "")
+	stub := &stubAdminRepo{}
+
+	seedAdmins(Service{Administrators: stub})
+
+	assert.Empty(t, stub.added)
 }
