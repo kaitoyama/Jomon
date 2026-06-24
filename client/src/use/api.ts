@@ -7,16 +7,12 @@ export const traQBaseURL = "https://q.trap.jp/api/v3";
 //     ? "http://localhost:3000"
 //     : process.env.VUE_APP_API_ENDPOINT;
 
+// NeoShowcase "Soft" member-auth: every page requires login (the router guard
+// calls this when /api/users/me is unauthenticated), so bounce to the platform's
+// forward-auth login. It forces traQ OIDC; on return the proxy adds
+// X-Forwarded-User and /api/users/me succeeds. We no longer drive traQ OAuth
+// from the client (that needed a server ClientID we intentionally don't set).
 export async function redirectAuthEndpoint(): Promise<void> {
-  const data = (await axios.get("/api/auth/genpkce")).data;
-  const authorizationEndpointUrl = new URL(`${traQBaseURL}/oauth2/authorize`);
-
-  authorizationEndpointUrl.search = new URLSearchParams({
-    response_type: "code",
-    client_id: data.client_id,
-    code_challenge: data.code_challenge,
-    code_challenge_method: data.code_challenge_method
-  }).toString();
-
-  window.location.assign(authorizationEndpointUrl.toString());
+  const redirect = window.location.pathname + window.location.search;
+  window.location.assign(`/_oauth/login?redirect=${encodeURIComponent(redirect)}`);
 }
