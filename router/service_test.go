@@ -130,3 +130,61 @@ func TestBearerToken(t *testing.T) {
 	c, _ = newAuthContext("Basic abc123")
 	assert.Equal(t, "", bearerToken(c))
 }
+
+func TestForwardedUser(t *testing.T) {
+	mk := func(h string) echo.Context {
+		c, _ := newAuthContext("")
+		if h != "" {
+			c.Request().Header.Set("X-Forwarded-User", h)
+		}
+		return c
+	}
+	t.Run("disabled returns empty even with header", func(t *testing.T) {
+		t.Setenv("TRUST_FORWARD_AUTH", "0")
+		assert.Equal(t, "", forwardedUser(mk("alice")))
+	})
+	t.Run("enabled returns header value", func(t *testing.T) {
+		t.Setenv("TRUST_FORWARD_AUTH", "1")
+		assert.Equal(t, "alice", forwardedUser(mk("alice")))
+	})
+	t.Run("enabled but no header returns empty", func(t *testing.T) {
+		t.Setenv("TRUST_FORWARD_AUTH", "1")
+		assert.Equal(t, "", forwardedUser(mk("")))
+	})
+	t.Run("X-Showcase-User fallback", func(t *testing.T) {
+		t.Setenv("TRUST_FORWARD_AUTH", "1")
+		c, _ := newAuthContext("")
+		c.Request().Header.Set("X-Showcase-User", "bob")
+		assert.Equal(t, "bob", forwardedUser(c))
+	})
+}
+
+// Forward-auth: a proxy-asserted user authenticates as that trap_id; admin via list.
+func TestAuthUser_Forwarded_Valid(t *testing.T) {
+	t.Setenv("TRUST_FORWARD_AUTH", "1")
+	s := Service{Administrators: &stubAdminRepo{admins: []string{"alice"}}}
+	c, _ := newAuthContext("")
+	c.Request().Header.Set("X-Forwarded-User", "alice")
+
+	got, err := s.AuthUser(c)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, got)
+	user, _ := got.Get(contextUserKey).(model.User)
+	assert.Equal(t, "alice", user.TrapId)
+	assert.True(t, user.IsAdmin)
+}
+
+func TestAuthUser_Forwarded_NonAdmin(t *testing.T) {
+	t.Setenv("TRUST_FORWARD_AUTH", "1")
+	s := Service{Administrators: &stubAdminRepo{admins: []string{"someoneElse"}}}
+	c, _ := newAuthContext("")
+	c.Request().Header.Set("X-Forwarded-User", "bob")
+
+	got, err := s.AuthUser(c)
+
+	assert.NoError(t, err)
+	user, _ := got.Get(contextUserKey).(model.User)
+	assert.Equal(t, "bob", user.TrapId)
+	assert.False(t, user.IsAdmin)
+}

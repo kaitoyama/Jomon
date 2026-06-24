@@ -17,18 +17,6 @@ import (
 )
 
 func NewService() Service {
-	swift, err := storagePkg.NewSwiftStorage(
-		os.Getenv("OS_CONTAINER"),
-		os.Getenv("OS_USERNAME"),
-		os.Getenv("OS_PASSWORD"),
-		os.Getenv("OS_TENANT_NAME"),
-		os.Getenv("OS_TENANT_ID"),
-		os.Getenv("OS_AUTH_URL"),
-	)
-	if err != nil {
-		panic(err)
-	}
-
 	traQClientId := os.Getenv("TRAQ_CLIENT_ID")
 	webhookSecret := os.Getenv("WEBHOOK_SECRET")
 	webhookChannelId := os.Getenv("WEBHOOK_CHANNEL_ID")
@@ -40,11 +28,43 @@ func NewService() Service {
 		Administrators: model.NewAdministratorRepository(),
 		Applications:   model.NewApplicationRepository(),
 		Comments:       model.NewCommentRepository(),
-		Images:         model.NewApplicationsImageRepository(&swift),
+		Images:         newImageRepository(),
 		Users:          model.NewUserRepository(),
 		TraQAuth:       model.NewTraQAuthRepository(traQClientId),
 		Webhook:        model.NewWebhookRepository(webhookSecret, webhookChannelId, webhookId),
 	}
+}
+
+// newImageRepository builds the image store: Swift in production, falling back to
+// ephemeral local storage when no Swift is configured (OS_AUTH_URL empty) — e.g. a
+// NeoShowcase dev deploy with no object store. Local uploads are not durable
+// (the container FS resets on restart), which is acceptable for dev; the payout
+// flow does not touch images.
+func newImageRepository() model.ApplicationsImageRepository {
+	if os.Getenv("OS_AUTH_URL") == "" {
+		dir := os.Getenv("UPLOAD_DIR")
+		if dir == "" {
+			dir = "./uploads"
+		}
+		local, err := storagePkg.NewLocalStorage(dir)
+		if err != nil {
+			panic(err)
+		}
+		return model.NewApplicationsImageRepository(&local)
+	}
+
+	swift, err := storagePkg.NewSwiftStorage(
+		os.Getenv("OS_CONTAINER"),
+		os.Getenv("OS_USERNAME"),
+		os.Getenv("OS_PASSWORD"),
+		os.Getenv("OS_TENANT_NAME"),
+		os.Getenv("OS_TENANT_ID"),
+		os.Getenv("OS_AUTH_URL"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return model.NewApplicationsImageRepository(&swift)
 }
 
 func EchoConfig(_ *echo.Echo) {}
@@ -58,6 +78,13 @@ func (s Service) AuthUser(c echo.Context) (echo.Context, error) {
 	// must be a Jomon administrator (it is also recorded as the repaid-by actor).
 	if token := bearerToken(c); token != "" {
 		return s.authServiceToken(c, token)
+	}
+
+	// Reverse-proxy forward-auth (NeoShowcase "Soft" member-auth): when enabled,
+	// trust the proxy's X-Forwarded-User as the traQ identity. The browser is
+	// authenticated by the platform, so Jomon needs no traQ OAuth of its own.
+	if trapId := forwardedUser(c); trapId != "" {
+		return s.authForwardedUser(c, trapId)
 	}
 
 	sess, err := session.Get(sessionKey, c)
@@ -112,6 +139,39 @@ func bearerToken(c echo.Context) string {
 		return strings.TrimSpace(h[len(prefix):])
 	}
 	return ""
+}
+
+// forwardedUser returns the traQ ID asserted by the trusted reverse proxy
+// (NeoShowcase "Soft" member-auth), or "" when not enabled/absent. Gated on
+// TRUST_FORWARD_AUTH=1 so the header is only trusted where the platform proxy
+// overwrites any client-supplied value. X-Forwarded-User is the current header;
+// X-Showcase-User is kept for compatibility.
+func forwardedUser(c echo.Context) string {
+	if os.Getenv("TRUST_FORWARD_AUTH") != "1" {
+		return ""
+	}
+	h := c.Request().Header.Get("X-Forwarded-User")
+	if h == "" {
+		h = c.Request().Header.Get("X-Showcase-User")
+	}
+	return strings.TrimSpace(h)
+}
+
+// authForwardedUser authenticates a browser request whose identity was asserted
+// by the trusted proxy. It acts as that traQ user; admin authorization is still
+// the DB-backed IsAdmin check in the handlers (admin via GetAdministratorList).
+func (s Service) authForwardedUser(c echo.Context, trapId string) (echo.Context, error) {
+	user := model.User{TrapId: trapId}
+	admins, err := s.Administrators.GetAdministratorList()
+	if err != nil {
+		return nil, c.NoContent(http.StatusInternalServerError)
+	}
+	user.GiveIsUserAdmin(admins)
+
+	c.Set(contextAccessTokenKey, "")
+	c.Set(contextUserKey, user)
+
+	return c, nil
 }
 
 // authServiceToken authenticates a Bearer service call. It succeeds only when
