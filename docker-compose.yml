@@ -21,6 +21,13 @@ services:
       MARIADB_PASSWORD: password
       MARIADB_HOSTNAME: db
       MARIADB_DATABASE: jomon
+      # Checkin → Jomon service-to-service auth. Consumed ONLY by the production
+      # (!debug) build's AuthUser; the local debug build authenticates every
+      # request as MyUser/admin and ignores these. SERVICE_TOKEN must equal
+      # Checkin's JOMON_API_TOKEN; SERVICE_USER_TRAP_ID must be a Jomon admin
+      # (it is recorded as the repaid-by actor on write-back).
+      SERVICE_TOKEN: ${SERVICE_TOKEN:-}
+      SERVICE_USER_TRAP_ID: ${SERVICE_USER_TRAP_ID:-}
     ports:
       - "1323:1323"
     volumes:
@@ -48,4 +55,5 @@ services:
     command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
 
     ports:
-      - "3306:3306"
+      # Remapped to avoid clashing with Checkin's MariaDB on host :3306.
+      - "3308:3306"

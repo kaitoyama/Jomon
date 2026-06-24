@@ -16,4 +16,4 @@ tasks:
     desc: Build the Go application
     dir: /src
     cmds:
-      - go build -tags debug -o /app/Jomon
+      - go build -tags debug -buildvcs=false -o /app/Jomon
